@@ -108,11 +108,14 @@ class MapProjection(CoordinateSystem):
         return px, py, pz
 
     def fromECEF(self, x, y, z):
-        #Edited below to fix Pyproj x,y,z same size issue in past versions
-        x = atleast_1d(x)
-        y = atleast_1d(y)
-        z = atleast_1d(z)
-        if (x.shape[0] == 0): return x,y,z #proj does not like empty arrays
+        try:
+            x,y,z = x,y,z #unchanged if Pyproj is < 4.x
+        except:
+            #Edited below to fix Pyproj x,y,z same size issue in recent versions
+            x = atleast_1d(x)
+            y = atleast_1d(y)
+            z = atleast_1d(z)
+            if (x.shape[0] == 0): return x,y,z #proj does not like empty arrays
         projectedData = array(proj4.transform(CoordinateSystem.WGS84xyz, self.projection, x, y, z ))
         if len(projectedData.shape) == 1:
             px, py, pz = projectedData[0], projectedData[1], projectedData[2]

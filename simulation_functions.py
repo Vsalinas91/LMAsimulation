@@ -582,6 +582,8 @@ else:
            Arguments:
                     -) fig is the current figure for plotting
                     -) axis is the desired axis to plot current figure (can be subplots for more than 1 axis)
+                       note: as for nice_plot, the axis already is/should be projected onto the desired cartopy projection
+                       in either the notebooks, or a custom script.
                     -) field is the field to be plotted with shape (e,m,n,z) where e is the error axis,
                        m and n are the spatial axes, and z is the vertical axis.
                     -) cfield is the field to be countoured as lines if levels are provided,
@@ -662,6 +664,20 @@ else:
            interval (also used for y), center of data in lat, lon, station
            locations, color scale, min and max limits and levels array for color
            scale.
+
+           Arguments:
+                -) Data is the data field to be plotted
+                -) lons,lats are the spatial coordinates of the data
+                -) centerLat,centerLon (unused)
+                -) stations are the lat lon station center locations
+                -) color is the colormap to be used for plotting
+                -) cmin,cmax are the color limits (vmin,vmax)
+                -) levels_t are the levels of the contour data
+                -) tanp,geo are the map projection instances used to Convert the
+                   spatial coordinates of the circles drawn on the map
+                -) axis is the axis of the figure in which the figure is to be plotted (can be
+                   the only axis, or one of many subplots)
+                -) proj is the data projection cartopy instance 
         """
         #Set projection to match original version
         # proj = ccrs.LambertAzimuthalEqualArea(central_latitude  = centerlat,
