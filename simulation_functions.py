@@ -2,15 +2,15 @@
 # Various functions for LMA simulations
 #
 # The black_box function is the main driver function
-# 
+#
 # Contact:
 # vanna.chmielewski@noaa.gov
 #
 #
 # This model and its results have been submitted to the Journal of Geophysical Research.
 # Please cite:
-# V. C. Chmielewski and E. C. Bruning (2016), Lightning Mapping Array flash detection 
-# performance with variable receiver thresholds, J. Geophys. Res. Atmos., 121, 8600-8614, 
+# V. C. Chmielewski and E. C. Bruning (2016), Lightning Mapping Array flash detection
+# performance with variable receiver thresholds, J. Geophys. Res. Atmos., 121, 8600-8614,
 # doi:10.1002/2016JD025159
 #
 # If any results from this model are presented.
@@ -20,8 +20,21 @@ import numpy as np
 from scipy.linalg import lstsq
 from scipy.optimize import leastsq
 from coordinateSystems import GeographicSystem
-from mpl_toolkits.basemap import Basemap
+try:
+    import cartopy.crs as ccrs
+    import cartopy.crs as ccrs
+    import cartopy.feature as cf
+    import cartopy.geodesic as geodesic
+    from shapely.geometry import Point
+    from mpl_toolkits.axes_grid1 import make_axes_locatable
+    import warnings
+    warnings.filterwarnings("ignore")
+    e=None
+except ImportError as e:
+    print('And older version of python is being used and cartopy cannot be imported. Defualting to Basemap for plotting.')
+    from mpl_toolkits.basemap import Basemap
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 
 
 def travel_time(X, X_ctr, c, t0=0.0, get_r=False):
@@ -101,83 +114,83 @@ def gen_retrieval_math(i, selection, t_all, t_mins, dxvec, drsq, center_ECEF,
                        max_z_guess=25.0e3):
     """ t_all is a N_stations x N_points masked array of arrival times at
         each station.
-        t_min is an N-point array of the index of the first unmasked station 
+        t_min is an N-point array of the index of the first unmasked station
         to receive a signal
 
         center_ECEF for the altitude check
 
-        This streamlines the generator function, which emits a stream of 
+        This streamlines the generator function, which emits a stream of
         nonlinear least-squares solutions.
-    """  
+    """
     m = t_mins[i]
     stations_ECEF2=stations_ECEF[selection]
     # Make a linear first guess
     p0 = linear_first_guess(np.array(t_all[:,i][selection]-t_all[m,i]),
-                            dxvec[m][selection], 
+                            dxvec[m][selection],
                             drsq[m][selection])
     t_i =t_all[:,i][selection]-t_all[m,i]
     # Checking altitude in lat/lon/alt from local coordinates
     latlon = np.array(GeographicSystem().fromECEF(p0[0], p0[1],p0[2]))
-    if (latlon[2]<0) | (latlon[2]>25000): 
+    if (latlon[2]<0) | (latlon[2]>25000):
         latlon[2] = 7000
         new = GeographicSystem().toECEF(latlon[0], latlon[1], latlon[2])
         p0[:3]=np.array(new)
-    plsq = np.array([np.nan]*5)   
-    plsq[:4], cov, infodict, mesg,ier = leastsq(residuals, p0, 
-                            args=(t_i, stations_ECEF2), 
-                            Dfun=dfunc,col_deriv=1,full_output=True) 
+    plsq = np.array([np.nan]*5)
+    plsq[:4], cov, infodict, mesg,ier = leastsq(residuals, p0,
+                            args=(t_i, stations_ECEF2),
+                            Dfun=dfunc,col_deriv=1,full_output=True)
     plsq[4] = np.sum(infodict['fvec']*infodict['fvec'])/(
                      dt_rms*dt_rms*(float(np.shape(stations_ECEF2)[0]-4)))
     return plsq
 
-def gen_retrieval(t_all, t_mins, dxvec, drsq, center_ECEF, stations_ECEF, 
-                  dt_rms, min_stations=5, max_z_guess=25.0e3): 
-    """ t_all is a N_stations x N_points masked array of arrival times at 
+def gen_retrieval(t_all, t_mins, dxvec, drsq, center_ECEF, stations_ECEF,
+                  dt_rms, min_stations=5, max_z_guess=25.0e3):
+    """ t_all is a N_stations x N_points masked array of arrival times at
         each station.
-        t_min is an N-point array of the index of the first unmasked station 
+        t_min is an N-point array of the index of the first unmasked station
         to receive a signal
-    
+
         center_ECEF for the altitude check
 
         This is a generator function, which emits a stream of nonlinear
         least-squares solutions.
-    """    
+    """
     for i in range(t_all.shape[1]):
         selection=~np.ma.getmaskarray(t_all[:,i])
         if np.all(selection == True):
             selection = np.array([True]*len(t_all[:,i]))
             yield gen_retrieval_math(i, selection, t_all, t_mins, dxvec, drsq,
-                                     center_ECEF, stations_ECEF, dt_rms, 
+                                     center_ECEF, stations_ECEF, dt_rms,
                                      min_stations, max_z_guess=25.0e3)
         elif np.sum(selection)>=min_stations:
             yield gen_retrieval_math(i, selection, t_all, t_mins, dxvec, drsq,
-                                     center_ECEF, stations_ECEF, dt_rms, 
+                                     center_ECEF, stations_ECEF, dt_rms,
                                      min_stations, max_z_guess=25.0e3)
-        else: 
+        else:
             yield np.array([np.nan]*5)
 
-def gen_retrieval_full(t_all, t_mins, dxvec, drsq, center_ECEF, stations_ECEF, 
-                       dt_rms, c0, min_stations=5, max_z_guess=25.0e3): 
-    """ t_all is a N_stations x N_points masked array of arrival times at 
+def gen_retrieval_full(t_all, t_mins, dxvec, drsq, center_ECEF, stations_ECEF,
+                       dt_rms, c0, min_stations=5, max_z_guess=25.0e3):
+    """ t_all is a N_stations x N_points masked array of arrival times at
         each station.
-        t_min is an N-point array of the index of the first unmasked station 
+        t_min is an N-point array of the index of the first unmasked station
         to receive a signal
-    
+
         center_ECEF for the altitude check
 
         This is a generator function, which emits a stream of nonlinear
         least-squares solutions.
 
-        Timing comes out of least-squares function as t*c from the initial 
+        Timing comes out of least-squares function as t*c from the initial
         station
-    """    
+    """
     for i in range(t_all.shape[1]):
         selection=~np.ma.getmaskarray(t_all[:,i])
         plsq = np.array([np.nan]*7)
         if np.all(selection == True):
             selection = np.array([True]*len(t_all[:,i]))
             plsq[:5] = gen_retrieval_math(i, selection, t_all, t_mins, dxvec,
-                         drsq, center_ECEF, stations_ECEF, dt_rms, 
+                         drsq, center_ECEF, stations_ECEF, dt_rms,
                          min_stations, max_z_guess=25.0e3)
             plsq[5] = plsq[3]/c0 + t_all[t_mins[i],i]
             plsq[6] = np.shape(stations_ECEF[selection])[0]
@@ -189,13 +202,13 @@ def gen_retrieval_full(t_all, t_mins, dxvec, drsq, center_ECEF, stations_ECEF,
             plsq[5] = plsq[3]/c0 + t_all[t_mins[i],i]
             plsq[6] = np.shape(stations_ECEF[selection])[0]
             yield plsq
-        else: 
+        else:
             plsq[6] = np.shape(stations_ECEF[selection])[0]
             yield plsq
 
 
 def array_from_generator2(generator, rows):
-    """Creates a numpy array from a specified number 
+    """Creates a numpy array from a specified number
     of values from the generator provided."""
     data = []
     for row in range(rows):
@@ -241,7 +254,7 @@ def black_box(x,y,z,n,
         a source. This must be at least 5, can be higher to filter out more
         poor solutions
 
-        If just_rms is True then only the rms error will be returned in a 
+        If just_rms is True then only the rms error will be returned in a
         (x,y,z) array.
         If false then mean error (r,z,theta), standard deviation (r,z,theta)
         both in units of (m,m,degrees)
@@ -249,21 +262,21 @@ def black_box(x,y,z,n,
     """
     points = np.array([np.zeros(n)+x, np.zeros(n)+y, np.zeros(n)+z]).T
     powers = np.empty(n)
-    
+
     # # For the old 1/p distribution:
     # powers = np.random.power(2, size=len(points[:,0]))**-2
-    
+
     # # For high powered sources (all stations contributing):
     # powers[:] = 10000
 
     # For the theoretical distribution:
     for i in range(len(powers)):
         powers[i] = np.max(1./np.random.uniform(0,1000,2000))
-    
+
     # Calculate distance and power retrieved at each station and mask
     # the stations which have higher thresholds than the retrieved power
 
-    points_f_ecef = (tanp.fromLocal(points.T)).T  
+    points_f_ecef = (tanp.fromLocal(points.T)).T
     dt, ran  = travel_time(points, stations_local, c0, get_r=True)
     pwr = received_power(powers, ran)
     masking = 10.*np.log10(pwr/1e-3) < ordered_threshs[:,np.newaxis]
@@ -275,24 +288,24 @@ def black_box(x,y,z,n,
     pwr = np.ma.masked_where(masking, pwr)
     dt  = np.ma.masked_where(masking, dt)
     ran = np.ma.masked_where(masking, ran)
-    
+
     # Add error to the retreived times
     dt_e = dt + np.random.normal(scale=dt_rms, size=np.shape(dt))
     dt_mins = np.argmin(dt_e, axis=0)
     # Precalculate some terms in ecef (fastest calculation)
-    points_f_ecef = (tanp.fromLocal(points.T)).T  
+    points_f_ecef = (tanp.fromLocal(points.T)).T
     full_dxvec, full_drsq = precalc_station_terms(stations_ecef)
     # Run the retrieved locations calculation
     # gen_retrieval returns a tuple of four positions, x,y,z,t.
-    dtype=[('x', float), ('y', float), ('z', float), ('t', float), 
+    dtype=[('x', float), ('y', float), ('z', float), ('t', float),
            ('chi2', float)]
     # Prime the generator function - pauses at the first yield statement.
-    point_gen = gen_retrieval(dt_e, dt_mins, full_dxvec, full_drsq, 
-                              center_ecef, stations_ecef, dt_rms, 
+    point_gen = gen_retrieval(dt_e, dt_mins, full_dxvec, full_drsq,
+                              center_ecef, stations_ecef, dt_rms,
                               min_stations)
     # Suck up the values produced by the generator, produce named array.
     # retrieved_locations = np.fromiter(point_gen, dtype=dtype)
-    # retrieved_locations = np.array([(a,b,c,e) for (a,b,c,d,e) in 
+    # retrieved_locations = np.array([(a,b,c,e) for (a,b,c,d,e) in
     #                                  retrieved_locations])
     retrieved_locations = array_from_generator2(point_gen,rows=n)
     retrieved_locations = retrieved_locations[:,[0,1,2,-1]]
@@ -303,19 +316,19 @@ def black_box(x,y,z,n,
         # Converts to projection
         # soluts = tanp.toLocal(retrieved_locations.T)
         # good   = soluts[2] > 0
-        proj_soluts = projl.fromECEF(retrieved_locations[:,0], 
-                                     retrieved_locations[:,1], 
+        proj_soluts = projl.fromECEF(retrieved_locations[:,0],
+                                     retrieved_locations[:,1],
                                      retrieved_locations[:,2])
         good = proj_soluts[2] > 0
         proj_soluts = (proj_soluts[0][good],proj_soluts[1][good],
                        proj_soluts[2][good])
-        proj_points = projl.fromECEF(points_f_ecef[good,0], 
-                                     points_f_ecef[good,1], 
+        proj_points = projl.fromECEF(points_f_ecef[good,0],
+                                     points_f_ecef[good,1],
                                      points_f_ecef[good,2])
 
         proj_soluts = np.ma.masked_invalid(proj_soluts)
-        # Converts to cylindrical coordinates since most errors 
-        # are in r and z, not theta 
+        # Converts to cylindrical coordinates since most errors
+        # are in r and z, not theta
         proj_points_cyl = np.array([(proj_points[0]**2+proj_points[1]**2)**0.5,
                               np.degrees(np.arctan(proj_points[0]/proj_points[1])),
                               proj_points[2]])
@@ -332,8 +345,8 @@ def black_box(x,y,z,n,
     else:
         #Convert back to local tangent plane
         soluts = tanp.toLocal(retrieved_locations.T)
-        proj_soluts = projl.fromECEF(retrieved_locations[:,0], 
-                                     retrieved_locations[:,1], 
+        proj_soluts = projl.fromECEF(retrieved_locations[:,0],
+                                     retrieved_locations[:,1],
                                      retrieved_locations[:,2])
         good = proj_soluts[2] > 0
         # good   = soluts[2] > 0
@@ -377,10 +390,10 @@ def black_box_full(x,y,z,n,
         a source. This must be at least 5, can be higher to filter out more
         poor solutions
 
-        If just_rms is True then only the rms error will be returned in a 
+        If just_rms is True then only the rms error will be returned in a
         (x,y,z) array (in m).
         If false then mean error (r,z,theta), standard deviation (r,z,theta)
-        both in units of (m,m,degrees) and the number of bad/missed solutions 
+        both in units of (m,m,degrees) and the number of bad/missed solutions
         will be returned.
     """
     # Creates an array of poins at x,y,z of n elements
@@ -399,20 +412,20 @@ def black_box_full(x,y,z,n,
     dt_e = dt + np.random.normal(scale=dt_rms, size=np.shape(dt))
     dt_mins = np.argmin(dt_e, axis=0)
     # Precalculate some terms
-    points_f_ecef = (tanp.fromLocal(points.T)).T  
+    points_f_ecef = (tanp.fromLocal(points.T)).T
     full_dxvec, full_drsq = precalc_station_terms(stations_ecef)
     # Run the retrieved locations calculation
     # gen_retrieval returns a tuple of four positions, x,y,z,t.
-    dtype=[('x', float), ('y', float), ('z', float), 
-           ('t', float), ('chi2', float), ('terror',float), 
+    dtype=[('x', float), ('y', float), ('z', float),
+           ('t', float), ('chi2', float), ('terror',float),
            ('stations', float)]
     # Prime the generator function - it pauses at the first yield statement.
-    point_gen = gen_retrieval_full(dt_e, dt_mins, full_dxvec, full_drsq, 
-                                   center_ecef, stations_ecef, dt_rms, 
-                                   min_stations) 
+    point_gen = gen_retrieval_full(dt_e, dt_mins, full_dxvec, full_drsq,
+                                   center_ecef, stations_ecef, dt_rms,
+                                   min_stations)
     # Suck up all the values produced by the generator, produce named array.
     # retrieved_locations = np.fromiter(point_gen, dtype=dtype)
-    # retrieved_locations = np.array([(a,b,c,e,f,g) for (a,b,c,d,e,f,g) in 
+    # retrieved_locations = np.array([(a,b,c,e,f,g) for (a,b,c,d,e,f,g) in
     #                                retrieved_locations])
     retrieved_locations = array_from_generator2(point_gen,rows=n)
     retrieved_locations = retrieved_locations[:,[0,1,2,4,5,6]]
@@ -425,14 +438,14 @@ def black_box_full(x,y,z,n,
     soluts = tanp.toLocal(retrieved_locations.T)
     good   = soluts[2] > 0
     station_count[~good] = np.nan
-    # proj_points = projl.fromECEF(points_f_ecef[good,0], 
-    #                              points_f_ecef[good,1], 
+    # proj_points = projl.fromECEF(points_f_ecef[good,0],
+    #                              points_f_ecef[good,1],
     #                              points_f_ecef[good,2])
-    # proj_soluts = projl.fromECEF(retrieved_locations[good,0], 
-    #                              retrieved_locations[good,1], 
+    # proj_soluts = projl.fromECEF(retrieved_locations[good,0],
+    #                              retrieved_locations[good,1],
     #                              retrieved_locations[good,2])
     # proj_soluts = np.ma.masked_invalid(proj_soluts)
-    # ranges = (np.sum((retrieved_locations[good,:3][:,np.newaxis] - 
+    # ranges = (np.sum((retrieved_locations[good,:3][:,np.newaxis] -
     #                   stations_ecef)**2, axis=2)**0.5).T
     # cal_pwr = (np.mean(pwr*(4*np.pi*ranges/4.762)**2, axis=0))
     # return proj_points, proj_soluts, chi2[good], terror[good], station_count[good]
@@ -457,7 +470,7 @@ def curvature_matrix(points,stations_local,ordered_threshs,c0,power,
 
         power is the source power for all of the points in Watts
 
-        timing_error is the Gaussian standard deviation of timing errors of 
+        timing_error is the Gaussian standard deviation of timing errors of
         the stations in seconds
     """
     # Find received powers to find which stations contibute for each source
@@ -499,54 +512,205 @@ def curvature_matrix(points,stations_local,ordered_threshs,c0,power,
         return np.array([errors[0,0],errors[1,1],errors[2,2],errors[3,3]])
     else: return np.array([np.nan,np.nan,np.nan,np.nan])
 
- 
-def mapped_plot(plot_this,from_this,to_this,with_this,dont_forget,
-                xmin,xmax,xint,ymin,ymax,yint,location):
-    """Make plots in map projection with km color scales, requires input 
-       array, lower color scale limit, higher color scale limit, color scale, 
-       station location overlay, and array x-,y- min, max and interval, the 
-       location of the array center (in lat and lon). Output plot also 
-       contains 100, 200 km range rings
-    """
-    domain = (xmax-xint/2.)
-    maps = Basemap(projection='laea',lat_0=location[0],lon_0=location[1],
-                   width=domain*2,height=domain*2)
-    s = plt.pcolormesh(np.arange(xmin-xint/2.,xmax+3*xint/2.,xint)+domain,
-                       np.arange(ymin-yint/2.,ymax+3*yint/2.,yint)+domain,
-                       plot_this, cmap = with_this)
-    s.set_clim(vmin=from_this,vmax=to_this)
-    plt.colorbar()
-    plt.scatter(dont_forget[:,0]+domain, dont_forget[:,1]+domain, color='k')
-    maps.drawstates()
-    circle=plt.Circle((domain,domain),100000,color='k',fill=False)
-    fig = plt.gcf()
-    fig.gca().add_artist(circle)
-    circle=plt.Circle((domain,domain),200000,color='k',fill=False)
-    fig = plt.gcf()
-    fig.gca().add_artist(circle)
+#Below plotting routines are chosen based on whether Basemap is available or not.
+#Typicall tied to which python version is being used to run the scripts/notebooks,
+#python <= 2.x will have basemap, python <= 3.x will not.
+if e is not None:
+    #Running plotting routines on basemap for older python versions
+    def mapped_plot(plot_this,from_this,to_this,with_this,dont_forget,
+                    xmin,xmax,xint,ymin,ymax,yint,location):
+        """Make plots in map projection with km color scales, requires input
+           array, lower color scale limit, higher color scale limit, color scale,
+           station location overlay, and array x-,y- min, max and interval, the
+           location of the array center (in lat and lon). Output plot also
+           contains 100, 200 km range rings
+        """
+        domain = (xmax-xint/2.)
+        maps = Basemap(projection='laea',lat_0=location[0],lon_0=location[1],
+                       width=domain*2,height=domain*2)
+        s = plt.pcolormesh(np.arange(xmin-xint/2.,xmax+3*xint/2.,xint)+domain,
+                           np.arange(ymin-yint/2.,ymax+3*yint/2.,yint)+domain,
+                           plot_this, cmap = with_this)
+        s.set_clim(vmin=from_this,vmax=to_this)
+        plt.colorbar()
+        plt.scatter(dont_forget[:,0]+domain, dont_forget[:,1]+domain, color='k')
+        maps.drawstates()
+        circle=plt.Circle((domain,domain),100000,color='k',fill=False)
+        fig = plt.gcf()
+        fig.gca().add_artist(circle)
+        circle=plt.Circle((domain,domain),200000,color='k',fill=False)
+        fig = plt.gcf()
+        fig.gca().add_artist(circle)
 
-def nice_plot(data,xmin,xmax,xint,centerlat,centerlon,stations,color,cmin,
-              cmax,levels_t):
-    """Make plots in map projection, requires input array, x-min max and 
-       interval (also used for y), center of data in lat, lon, station 
-       locations, color scale, min and max limits and levels array for color
-       scale.
-    """
-    domain = xmax-xint/2.
-    maps = Basemap(projection='laea',lat_0=centerlat,lon_0=centerlon,
-                   width=domain*2,height=domain*2)
-    s = plt.pcolormesh(np.arange(xmin-xint/2.,xmax+3*xint/2.,xint)+domain,
-                       np.arange(xmin-xint/2.,xmax+3*xint/2.,xint)+domain,
-                       data, cmap = color)
-    s.set_clim(vmin=cmin,vmax=cmax)
-    CS = plt.contour(np.arange(xmin,xmax+xint,xint)+domain,
-                     np.arange(xmin,xmax+xint,xint)+domain,
-                     data, colors='k',levels=levels_t)
-    plt.clabel(CS, inline=1, fmt='%1.2f',fontsize=8)
-    plt.scatter(stations[:,0]+domain, stations[:,1]+domain, color='k',s=2)
-    maps.drawstates()
-    fig = plt.gcf()
-    circle=plt.Circle((domain,domain),100000,color='0.5',fill=False)
-    fig.gca().add_artist(circle)
-    circle=plt.Circle((domain,domain),200000,color='0.5',fill=False)
-    fig.gca().add_artist(circle)
+
+    def nice_plot(data,xmin,xmax,xint,centerlat,centerlon,stations,color,cmin,
+                  cmax,levels_t):
+        """Make plots in map projection, requires input array, x-min max and
+           interval (also used for y), center of data in lat, lon, station
+           locations, color scale, min and max limits and levels array for color
+           scale.
+        """
+        domain = xmax-xint/2.
+        maps = Basemap(projection='laea',lat_0=centerlat,lon_0=centerlon,
+                       width=domain*2,height=domain*2)
+        s = plt.pcolormesh(np.arange(xmin-xint/2.,xmax+3*xint/2.,xint)+domain,
+                           np.arange(xmin-xint/2.,xmax+3*xint/2.,xint)+domain,
+                           data, cmap = color)
+        s.set_clim(vmin=cmin,vmax=cmax)
+        CS = plt.contour(np.arange(xmin,xmax+xint,xint)+domain,
+                         np.arange(xmin,xmax+xint,xint)+domain,
+                         data, colors='k',levels=levels_t)
+        plt.clabel(CS, inline=1, fmt='%1.2f',fontsize=8)
+        plt.scatter(stations[:,0]+domain, stations[:,1]+domain, color='k',s=2)
+        maps.drawstates()
+        fig = plt.gcf()
+        circle=plt.Circle((domain,domain),100000,color='0.5',fill=False)
+        fig.gca().add_artist(circle)
+        circle=plt.Circle((domain,domain),200000,color='0.5',fill=False)
+        fig.gca().add_artist(circle)
+
+else:
+    #Running plotting routines using cartopy for more recent Python versions 3.x
+    def mapped_plot(fig,ax,field,cfield,plot_lon,plot_lat,buffer,geo,tanp,cmap,from_this,to_this,
+                    lon,lat,label,levels=(0.05,0.1,0.5,1,5),plot_circles=True):
+        """Make plots in map projection with km color scales, requires input
+           array, lower color scale limit, higher color scale limit, color scale,
+           station location overlay, and array x-,y- min, max and interval, the
+           location of the array center (in lat and lon). Output plot also
+           contains 100, 200 km range rings if desired (set plot_circles = True)
+
+           Arguments:
+                    -) fig is the current figure for plotting
+                    -) axis is the desired axis to plot current figure (can be subplots for more than 1 axis)
+                    -) field is the field to be plotted with shape (e,m,n,z) where e is the error axis,
+                       m and n are the spatial axes, and z is the vertical axis.
+                    -) cfield is the field to be countoured as lines if levels are provided,
+                    -) field_indx is the index of the error field desired to be plotted (e)
+                    -) plot_lon and plot_lat are the spatial coordinates for plotting.
+                    -) buffer is the map buffer which determines how much of the map is visualized the figure.\
+                    -) tanp and geo are the coordinate transformation instances
+                    -) lon,lat are the station coordinates
+                    -) lables are the figure titles for the errors,
+                    -) levels are the contour/field levels for plotting,
+                    -) plot_circles plots range circles if set to True.
+        """
+        #Resetting coordinate names:
+        lonp = plot_lon
+        latp = plot_lat
+
+        #Set Map Extents:
+        ax.set_extent([lonp.min()+buffer,lonp.max()-buffer,
+                       latp.min()+buffer,latp.max()-buffer])
+
+        #Figure plotting:
+        field   = field
+        s       = ax.pcolormesh(lonp,latp,field,cmap=cmap,transform = ccrs.PlateCarree())
+        divider = make_axes_locatable(ax)
+        ax_cb   = divider.new_horizontal(size="5%", pad=.3, axes_class=plt.Axes)
+        fig.add_axes(ax_cb)
+        plt.colorbar(s,cax=ax_cb,label=label)
+        s.set_clim(vmin=from_this,vmax=to_this)
+
+
+        if levels is not None:
+            CS = ax.contour(lonp,latp,
+                         cfield, colors='k',levels=levels,
+                         transform=ccrs.PlateCarree())
+            plt.clabel(CS, inline=1, fontsize=10)
+        ax.set_title(label)
+
+
+        #Scatter plot all stations on map
+        ax.scatter(lon,lat, color='k',s=15 ,transform = ccrs.PlateCarree())
+
+
+        #Add land/map features including state lines
+        ax.add_feature(cf.NaturalEarthFeature(
+                       category='cultural',
+                       name='admin_1_states_provinces_lines',
+                       scale='50m',
+                       facecolor='none',
+                       ))
+        ax.add_feature(cf.STATES)
+        ax.coastlines('50m') #if near ocean/gulf
+
+        if plot_circles == True:
+            #Plot Circles:
+            #This is super janky but works for anything that covers short distances (in relation to Earth's curvature);
+            #solution based on: https://gis.stackexchange.com/questions/121256/creating-a-circle-with-radius-in-metres
+            center_point = Point(0,0)
+            #Buffers are in meters
+            circle_100 = center_point.buffer(100e3)
+            circle_200 = center_point.buffer(200e3)
+            #Get circle boundary coordinates
+            x_100,y_100 = np.array(circle_100.boundary.xy[0]),np.array(circle_100.boundary.xy[1])
+            x_200,y_200 = np.array(circle_200.boundary.xy[0]),np.array(circle_200.boundary.xy[1])
+            #Transform the boundary coordinates from local (meters) into lat lon
+            c100_x,c100_y,_     = tanp.fromLocal(np.vstack((x_100,y_100,x_100*0)))
+            lon_100,lat_100,_   = geo.fromECEF(c100_x,c100_y,_)
+
+            c200_x,c200_y,_     = tanp.fromLocal(np.vstack((x_200,y_200,x_200*0)))
+            lon_200,lat_200,_   = geo.fromECEF(c200_x,c200_y,_)
+            #Plot Circles
+            ax.plot(lon_100,lat_100,color='k',linewidth=1,transform = ccrs.PlateCarree())
+            ax.plot(lon_200,lat_200,color='k',linewidth=1,transform = ccrs.PlateCarree())
+
+
+    def nice_plot(data,lons,lats,centerlat,centerlon,stations,color,cmin,
+                  cmax,levels_t,tanp,geo,axis,proj):
+        """Make plots in map projection, requires input array, x-min max and
+           interval (also used for y), center of data in lat, lon, station
+           locations, color scale, min and max limits and levels array for color
+           scale.
+        """
+        #Set projection to match original version
+        # proj = ccrs.LambertAzimuthalEqualArea(central_latitude  = centerlat,
+        #                                       central_longitude = centerlon)
+        #Make Figure axis
+        # ax = plt.axes(projection = proj)
+        ax = axis
+
+        #Set Map Extents:
+        buffer = 0.08 #degrees
+        ax.set_extent([lons[0]-buffer,lons[-1]+buffer,
+                       lats[0]-buffer,lats[-1]+buffer])
+
+        #Plot the simulation data
+        s = ax.pcolormesh(lons, lats, data, cmap=color,transform = ccrs.PlateCarree())
+        s.set_clim(vmin=cmin,vmax=cmax)
+        #Contour specified intervals and label them inline
+        CS = ax.contour(lons, lats, data, colors='k',levels=levels_t,transform = ccrs.PlateCarree())
+        plt.clabel(CS, inline=1, fmt='%1.2f',fontsize=8)
+        #Scatter plot all stations on map
+        ax.scatter(stations[:,0], stations[:,1], color='k',s=2,transform = ccrs.PlateCarree())
+
+
+        #Add land/map features including state lines
+        ax.add_feature(cf.NaturalEarthFeature(
+                       category='cultural',
+                       name='admin_1_states_provinces_lines',
+                       scale='50m',
+                       facecolor='none',
+                       ))
+        ax.add_feature(cf.STATES)
+        ax.coastlines('50m') #if near ocean/gulf
+
+        #Plot Circles:
+        #This is super janky but works for anything that covers short distances (in relation to Earth's curvature);
+        #solution based on: https://gis.stackexchange.com/questions/121256/creating-a-circle-with-radius-in-metres
+        center_point = Point(0,0)
+        #Buffers are in meters
+        circle_100 = center_point.buffer(100e3)
+        circle_200 = center_point.buffer(200e3)
+        #Get circle boundary coordinates
+        x_100,y_100 = np.array(circle_100.boundary.xy[0]),np.array(circle_100.boundary.xy[1])
+        x_200,y_200 = np.array(circle_200.boundary.xy[0]),np.array(circle_200.boundary.xy[1])
+        #Transform the boundary coordinates from local (meters) into lat lon
+        c100_x,c100_y,_     = tanp.fromLocal(np.vstack((x_100,y_100,x_100*0)))
+        lon_100,lat_100,_   = geo.fromECEF(c100_x,c100_y,_)
+
+        c200_x,c200_y,_     = tanp.fromLocal(np.vstack((x_200,y_200,x_200*0)))
+        lon_200,lat_200,_   = geo.fromECEF(c200_x,c200_y,_)
+        #Plot Circles
+        ax.plot(lon_100,lat_100,color='gray',linewidth=1,transform = ccrs.PlateCarree())
+        ax.plot(lon_200,lat_200,color='gray',linewidth=1,transform = ccrs.PlateCarree())

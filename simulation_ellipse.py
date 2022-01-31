@@ -2,10 +2,6 @@ import numpy as np
 from scipy.linalg import lstsq
 from scipy.optimize import leastsq
 from coordinateSystems import GeographicSystem
-from mpl_toolkits.basemap import Basemap
-import matplotlib.pyplot as plt
-from matplotlib.patches import Ellipse
-
 
 def travel_time(X, X_ctr, c, t0=0.0, get_r=False):
     """ Units are meters, seconds.
@@ -84,83 +80,83 @@ def gen_retrieval_math(i, selection, t_all, t_mins, dxvec, drsq, center_ECEF,
                        max_z_guess=25.0e3):
     """ t_all is a N_stations x N_points masked array of arrival times at
         each station.
-        t_min is an N-point array of the index of the first unmasked station 
+        t_min is an N-point array of the index of the first unmasked station
         to receive a signal
 
         center_ECEF for the altitude check
 
-        This streamlines the generator function, which emits a stream of 
+        This streamlines the generator function, which emits a stream of
         nonlinear least-squares solutions.
-    """  
+    """
     m = t_mins[i]
     stations_ECEF2=stations_ECEF[selection]
     # Make a linear first guess
     p0 = linear_first_guess(np.array(t_all[:,i][selection]-t_all[m,i]),
-                            dxvec[m][selection], 
+                            dxvec[m][selection],
                             drsq[m][selection])
     t_i =t_all[:,i][selection]-t_all[m,i]
     # Checking altitude in lat/lon/alt from local coordinates
     latlon = np.array(GeographicSystem().fromECEF(p0[0], p0[1],p0[2]))
-    if (latlon[2]<0) | (latlon[2]>25000): 
+    if (latlon[2]<0) | (latlon[2]>25000):
         latlon[2] = 7000
         new = GeographicSystem().toECEF(latlon[0], latlon[1], latlon[2])
         p0[:3]=np.array(new)
-    plsq = np.array([np.nan]*5)   
-    plsq[:4], cov, infodict, mesg,ier = leastsq(residuals, p0, 
-                            args=(t_i, stations_ECEF2), 
-                            Dfun=dfunc,col_deriv=1,full_output=True) 
+    plsq = np.array([np.nan]*5)
+    plsq[:4], cov, infodict, mesg,ier = leastsq(residuals, p0,
+                            args=(t_i, stations_ECEF2),
+                            Dfun=dfunc,col_deriv=1,full_output=True)
     plsq[4] = np.sum(infodict['fvec']*infodict['fvec'])/(
                      dt_rms*dt_rms*(float(np.shape(stations_ECEF2)[0]-4)))
     return plsq
 
-def gen_retrieval(t_all, t_mins, dxvec, drsq, center_ECEF, stations_ECEF, 
-                  dt_rms, min_stations=5, max_z_guess=25.0e3): 
-    """ t_all is a N_stations x N_points masked array of arrival times at 
+def gen_retrieval(t_all, t_mins, dxvec, drsq, center_ECEF, stations_ECEF,
+                  dt_rms, min_stations=5, max_z_guess=25.0e3):
+    """ t_all is a N_stations x N_points masked array of arrival times at
         each station.
-        t_min is an N-point array of the index of the first unmasked station 
+        t_min is an N-point array of the index of the first unmasked station
         to receive a signal
-    
+
         center_ECEF for the altitude check
 
         This is a generator function, which emits a stream of nonlinear
         least-squares solutions.
-    """    
+    """
     for i in range(t_all.shape[1]):
         selection=~np.ma.getmask(t_all[:,i])
         if np.all(selection == True):
             selection = np.array([True]*len(t_all[:,i]))
             yield gen_retrieval_math(i, selection, t_all, t_mins, dxvec, drsq,
-                                     center_ECEF, stations_ECEF, dt_rms, 
+                                     center_ECEF, stations_ECEF, dt_rms,
                                      min_stations, max_z_guess=25.0e3)
         elif np.sum(selection)>=min_stations:
             yield gen_retrieval_math(i, selection, t_all, t_mins, dxvec, drsq,
-                                     center_ECEF, stations_ECEF, dt_rms, 
+                                     center_ECEF, stations_ECEF, dt_rms,
                                      min_stations, max_z_guess=25.0e3)
-        else: 
+        else:
             yield np.array([np.nan]*5)
 
-def gen_retrieval_full(t_all, t_mins, dxvec, drsq, center_ECEF, stations_ECEF, 
-                       dt_rms, c0, min_stations=5, max_z_guess=25.0e3): 
-    """ t_all is a N_stations x N_points masked array of arrival times at 
+def gen_retrieval_full(t_all, t_mins, dxvec, drsq, center_ECEF, stations_ECEF,
+                       dt_rms, c0, min_stations=5, max_z_guess=25.0e3):
+    """ t_all is a N_stations x N_points masked array of arrival times at
         each station.
-        t_min is an N-point array of the index of the first unmasked station 
+        t_min is an N-point array of the index of the first unmasked station
         to receive a signal
-    
+
         center_ECEF for the altitude check
 
         This is a generator function, which emits a stream of nonlinear
         least-squares solutions.
 
-        Timing comes out of least-squares function as t*c from the initial 
+        Timing comes out of least-squares function as t*c from the initial
         station
-    """    
+    """
     for i in range(t_all.shape[1]):
         selection=~np.ma.getmask(t_all[:,i])
         plsq = np.array([np.nan]*7)
         if np.all(selection == True):
             selection = np.array([True]*len(t_all[:,i]))
             plsq[:5] = gen_retrieval_math(i, selection, t_all, t_mins, dxvec,
-                         drsq, center_ECEF, stations_ECEF, dt_rms, 
+                         drsq, center_ECEF, stations_ECEF, dt_rms,
                          min_stations, max_z_guess=25.0e3)
             plsq[5] = plsq[3]/c0 + t_all[t_mins[i],i]
             plsq[6] = np.shape(stations_ECEF[selection])[0]
@@ -172,7 +168,7 @@ def gen_retrieval_full(t_all, t_mins, dxvec, drsq, center_ECEF, stations_ECEF,
             plsq[5] = plsq[3]/c0 + t_all[t_mins[i],i]
             plsq[6] = np.shape(stations_ECEF[selection])[0]
             yield plsq
-        else: 
+        else:
             plsq[6] = np.shape(stations_ECEF[selection])[0]
             yield plsq
 
@@ -182,7 +178,7 @@ def eigsorted(cov):
     return vals[order], vecs[:,order]
 
 def array_from_generator2(generator, rows):
-    """Creates a numpy array from a specified number 
+    """Creates a numpy array from a specified number
     of values from the generator provided."""
     data = []
     for row in range(rows):
@@ -237,10 +233,10 @@ def black_boxtesting(x,y,z,n,
     # For the theoretical distribution:
     for i in range(len(powers)):
         powers[i] = np.max(1./np.random.uniform(0,1000,2000))
-    
+
     # Calculate distance and power retrieved at each station and mask
     # the stations which have higher thresholds than the retrieved power
-    points_f_ecef = (tanp.fromLocal(points.T)).T  
+    points_f_ecef = (tanp.fromLocal(points.T)).T
     dt, ran  = travel_time(points, stations_local, c0, get_r=True)
     pwr = received_power(powers, ran)
     masking = 10.*np.log10(pwr/1e-3) < ordered_threshs[:,np.newaxis]
@@ -252,33 +248,33 @@ def black_boxtesting(x,y,z,n,
     pwr = np.ma.masked_where(masking, pwr)
     dt  = np.ma.masked_where(masking, dt)
     ran = np.ma.masked_where(masking, ran)
-    
+
     # Add error to the retreived times
     dt_e = dt + np.random.normal(scale=dt_rms, size=np.shape(dt))
     dt_mins = np.argmin(dt_e, axis=0)
     # Precalculate some terms in ecef (fastest calculation)
-    points_f_ecef = (tanp.fromLocal(points.T)).T  
+    points_f_ecef = (tanp.fromLocal(points.T)).T
     full_dxvec, full_drsq = precalc_station_terms(stations_ecef)
     # Run the retrieved locations calculation
     # gen_retrieval returns a tuple of four positions, x,y,z,t.
-    dtype=[('x', float), ('y', float), ('z', float), ('t', float), 
+    dtype=[('x', float), ('y', float), ('z', float), ('t', float),
            ('chi2', float)]
     # Prime the generator function - pauses at the first yield statement.
-    point_gen = gen_retrieval(dt_e, dt_mins, full_dxvec, full_drsq, 
-                              center_ecef, stations_ecef, dt_rms, 
+    point_gen = gen_retrieval(dt_e, dt_mins, full_dxvec, full_drsq,
+                              center_ecef, stations_ecef, dt_rms,
                               min_stations)
     # Suck up the values produced by the generator, produce named array.
     retrieved_locations = array_from_generator2(point_gen,rows=n)
     # retrieved_locations = np.fromiter(point_gen, dtype=dtype)
-    retrieved_locations = np.array([(a,b,c,e) for (a,b,c,d,e) in 
+    retrieved_locations = np.array([(a,b,c,e) for (a,b,c,d,e) in
                                      retrieved_locations])
     chi2                = retrieved_locations[:,3]
     retrieved_locations = retrieved_locations[:,:3]
     retrieved_locations = np.ma.masked_invalid(retrieved_locations)
     #Convert back to local tangent plane
     soluts = tanp.toLocal(retrieved_locations.T)
-    proj_soluts = projl.fromECEF(retrieved_locations[:,0], 
-                                 retrieved_locations[:,1], 
+    proj_soluts = projl.fromECEF(retrieved_locations[:,0],
+                                 retrieved_locations[:,1],
                                  retrieved_locations[:,2])
     good = proj_soluts[2] > 0
     proj_soluts = (proj_soluts[0][good],proj_soluts[1][good],
